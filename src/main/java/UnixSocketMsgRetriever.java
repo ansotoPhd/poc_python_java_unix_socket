@@ -14,8 +14,12 @@ public class UnixSocketMsgRetriever extends Thread{
     private File socketFile;
     private AFUNIXSocket sock;
     private BlockingQueue<String> queue;
+    private String startSubString = "<trepan_cmd>";
+    private String endSubString = "</trepan_cmd>";
 
-    public UnixSocketMsgRetriever(String unixSocketPath, BlockingQueue<String> queue ) throws IOException {
+    public UnixSocketMsgRetriever(
+            String unixSocketPath, BlockingQueue<String> queue
+    ) throws IOException {
         this.socketFile = new File(unixSocketPath);
         this.sock = AFUNIXSocket.newInstance();
         this.queue = queue;
@@ -26,25 +30,35 @@ public class UnixSocketMsgRetriever extends Thread{
 
         try {
             // · Connect to unix socket
-            try {
-                sock.connect(new AFUNIXSocketAddress(socketFile));
-            } catch (AFUNIXSocketException e) {
+            int tries = 0;
+            boolean connected = false;
+            while (tries < 10 && !connected){
+                tries += 1;
+                try {
+                    sock.connect(new AFUNIXSocketAddress(socketFile));
+                    connected = true;
+                } catch (AFUNIXSocketException e) {
+                    Thread.sleep(500);
+                }
+            }
+            if(tries==10){
                 System.out.println("Cannot connect to server. Have you started it?");
                 System.out.flush();
-                throw e;
+                throw new Exception("Cannot connect to server. Have you started it?");
             }
+
             System.out.println("Connected");
             // · Getting socket input stream
             InputStream is = sock.getInputStream();
             // · Split data received through socket into msg with help of tags
             String buffer = "";
-            List<String> msg_list = new ArrayList<String>();
-            byte[] buf = new byte[5];
-            String startSubString = "<msg>"; int startIndex = 0; boolean startFlag = false;
-            String endSubString = "</msg>"; int endIndex = 0; boolean endFlag = false;
+            byte[] buf = new byte[1024];
+            int startIndex = 0; boolean startFlag = false;
+            int endIndex = 0; boolean endFlag = false;
             while(true) {
                 int read = is.read(buf);
-                buffer += new String(buf, 0, read);
+                if(read > 0)
+                    buffer += new String(buf, 0, read);
                 boolean found=true;
                 while (found && !buffer.isEmpty()){
                     found = false;
@@ -63,7 +77,9 @@ public class UnixSocketMsgRetriever extends Thread{
                         startFlag = false;
                         endFlag = false;
                         String msg = buffer.substring(startIndex + startSubString.length(), endIndex);
-                        msg_list.add(msg);
+                        System.out.println("*********** socket *******************************");
+                        System.out.println(msg);
+                        System.out.println("********** /socket *******************************\n");
                         this.queue.put(msg);
                         buffer = buffer.substring(endIndex+endSubString.length(), buffer.length());
                     }
